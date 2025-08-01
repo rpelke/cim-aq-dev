@@ -111,8 +111,7 @@ python "${REPO_ROOT}/rl_quantize.py" \
   --dataset $DATASET \
   --dataset_root $DATASET_ROOT \
   --suffix "${OUTPUT_SUFFIX}_from_8bit" \
-  --preserve_ratio 1.0 \
-  --float_bit 8 \
+  --orig_bit 8 \
   --max_bit $MAX_BIT \
   --min_bit $MIN_BIT \
   --n_worker 32 \
@@ -120,7 +119,6 @@ python "${REPO_ROOT}/rl_quantize.py" \
   --train_size 20000 \
   --val_size 10000 \
   --acc_drop $MAX_ACCURACY_DROP \
-  --acc_constraint \
   $CONSIDER_CELL_RESOLUTION_CLI_ARG \
   $FORCE_FIRST_LAST_CLI_ARG \
   --finetune_epoch $SEARCH_FINETUNE_EPOCHS \
