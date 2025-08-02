@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # CIM-AQ Full Workflow Script
 # This script orchestrates a two-stage CIM-AQ workflow using YAML configuration
 
@@ -14,11 +17,26 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
-# Source library functions
-source "${SCRIPT_DIR}/lib/workflow_config.sh"
-source "${SCRIPT_DIR}/lib/stage_execution.sh"
-source "${SCRIPT_DIR}/lib/model_evaluation.sh"
-source "${SCRIPT_DIR}/lib/results_reporting.sh"
+# Source library functions with error checking
+if ! source "${SCRIPT_DIR}/lib/workflow_config.sh"; then
+  echo "❌ Failed to load workflow_config.sh"
+  exit 1
+fi
+
+if ! source "${SCRIPT_DIR}/lib/stage_execution.sh"; then
+  echo "❌ Failed to load stage_execution.sh"
+  exit 1
+fi
+
+if ! source "${SCRIPT_DIR}/lib/model_evaluation.sh"; then
+  echo "❌ Failed to load model_evaluation.sh"
+  exit 1
+fi
+
+if ! source "${SCRIPT_DIR}/lib/results_reporting.sh"; then
+  echo "❌ Failed to load results_reporting.sh"
+  exit 1
+fi
 
 # Usage information
 show_usage() {
@@ -93,7 +111,10 @@ fi
 # Evaluate Stage 1 models
 echo ""
 echo "========== Stage 1.5: Evaluation on $SMALL_DATASET =========="
-evaluate_stage_models "SMALL" "$SMALL_DATASET" "$SMALL_DATASET_ROOT" "$REPO_ROOT"
+if ! evaluate_stage_models "SMALL" "$SMALL_DATASET" "$SMALL_DATASET_ROOT" "$REPO_ROOT"; then
+  echo "❌ Stage 1 model evaluation failed"
+  exit 1
+fi
 
 # Print Stage 1 results
 print_stage_results "Stage 1" "$SMALL_DATASET"
@@ -115,7 +136,10 @@ if [ "$ENABLE_LARGE_DATASET" = "true" ]; then
   # Evaluate Stage 2 models
   echo ""
   echo "========== Stage 2.4: Evaluation on $LARGE_DATASET =========="
-  evaluate_stage_models "LARGE" "$LARGE_DATASET" "$LARGE_DATASET_ROOT" "$REPO_ROOT"
+  if ! evaluate_stage_models "LARGE" "$LARGE_DATASET" "$LARGE_DATASET_ROOT" "$REPO_ROOT"; then
+    echo "❌ Stage 2 model evaluation failed"
+    exit 1
+  fi
 
   # Print Stage 2 results
   print_stage_results "Stage 2" "$LARGE_DATASET"
@@ -128,4 +152,7 @@ fi
 # FINAL SUMMARY AND COMPARISON
 # ========================================
 
-generate_workflow_report "$CONFIG_FILE" "$MAX_ACCURACY_DROP" "$ENABLE_LARGE_DATASET"
+if ! generate_workflow_report "$CONFIG_FILE" "$MAX_ACCURACY_DROP" "$ENABLE_LARGE_DATASET"; then
+  echo "❌ Workflow report generation failed"
+  exit 1
+fi

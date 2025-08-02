@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -69,6 +72,12 @@ echo "Step 1/4: Downloading pretrained ${BASE_MODEL_NAME} weights from torchvisi
 mkdir -p "${REPO_ROOT}/pretrained/imagenet"
 python "${REPO_ROOT}/lib/utils/get_model_weights.py" --model_name ${BASE_MODEL_NAME} --num_classes $NUM_CLASSES --output_dir "${REPO_ROOT}/pretrained/imagenet"
 
+# Check if the command succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to run model weights download script."
+  exit 1
+fi
+
 # Check if the weights were downloaded successfully
 TORCHVISION_MODEL_FILE="${REPO_ROOT}/pretrained/imagenet/${BASE_MODEL_NAME}_${NUM_CLASSES}classes.pth.tar"
 if [ ! -f "$TORCHVISION_MODEL_FILE" ]; then
@@ -86,6 +95,13 @@ echo ""
 echo "Step 2/4: Creating dummy strategy file for FP32 model evaluation..."
 mkdir -p "${REPO_ROOT}/save/uniform_strategies"
 python "${REPO_ROOT}/utils/create_uniform_strategy.py" --arch $FP32_MODEL --w_bit 8 --a_bit 8 --force_first_last_layer --output "${REPO_ROOT}/save/uniform_strategies"
+
+# Check if the command succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to create dummy strategy file."
+  exit 1
+fi
+
 FP32_STRATEGY_FILE="${REPO_ROOT}/save/uniform_strategies/${FP32_MODEL}_w8a8.npy"
 
 if [ ! -f "$FP32_STRATEGY_FILE" ]; then
@@ -123,6 +139,12 @@ python "${REPO_ROOT}/finetune.py" \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
 
+# Check if training succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: FP32 fine-tuning failed."
+  exit 1
+fi
+
 # Check if FP32 finetuned model exists
 FP32_MODEL_FILE="${FP32_MODEL_DIR}/model_best.pth.tar"
 if [ ! -f "$FP32_MODEL_FILE" ]; then
@@ -144,6 +166,12 @@ EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --strategy_file $FP32_STRATEGY_FILE \
     --gpu_id $GPU_ID \
   --resume $FP32_MODEL_FILE 2>&1 | tee /dev/tty)
+
+# Check if evaluation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: FP32 model evaluation failed."
+  exit 1
+fi
 
 # Store the baseline accuracy by parsing the output
 BASELINE_ACCURACY=$(echo "$EVAL_OUTPUT" | grep -oP "Test Acc:\s+\K[0-9\.]+")

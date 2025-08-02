@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -104,6 +107,12 @@ python "${REPO_ROOT}/finetune.py" \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
 
+# Check if training succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Mixed precision fine-tuning failed."
+  exit 1
+fi
+
 # Check if fine-tuned model exists
 FINAL_MODEL_FILE="${CHECKPOINT_DIR}/model_best.pth.tar"
 if [ ! -f "$FINAL_MODEL_FILE" ]; then
@@ -124,6 +133,12 @@ FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --gpu_id $GPU_ID \
     --amp \
   --strategy_file $STRATEGY_FILE 2>&1 | tee /dev/tty)
+
+# Check if evaluation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Mixed precision model evaluation failed."
+  exit 1
+fi
 
 # Try to extract the final accuracy
 FINAL_ACCURACY=$(echo "$FINAL_EVAL_OUTPUT" | grep -oP "Test Acc:\s+\K[0-9\.]+")

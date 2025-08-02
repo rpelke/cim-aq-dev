@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -100,6 +103,12 @@ LAYER_DIMS_FILE="${BASE_MODEL_NAME}_layer_dimensions.yaml"
 
 bash "${SCRIPT_DIR}/run_hardware_config.sh" $QUANT_MODEL $MAX_BIT $LAYER_DIMS_FILE "hardware_config.yaml"
 
+# Check if hardware config generation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Hardware configuration generation failed."
+  exit 1
+fi
+
 # Step 2: Run RL-based quantization search
 echo ""
 echo "Step 2/2: Running RL-based quantization search from 8-bit model..."
@@ -135,6 +144,12 @@ python "${REPO_ROOT}/rl_quantize.py" \
   --gpu_id $GPU_ID \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
+
+# Check if RL search succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: RL-based quantization search failed."
+  exit 1
+fi
 
 # Check if best strategy file exists
 STRATEGY_FILE="${REPO_ROOT}/save/${QUANT_MODEL}_${DATASET}_${OUTPUT_SUFFIX}_from_8bit/best_policy.npy"

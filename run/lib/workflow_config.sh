@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Configuration management functions for CIM-AQ workflows
 # This library provides functions for parsing YAML configs and setting up workflow variables
 

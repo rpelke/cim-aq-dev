@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -79,6 +82,12 @@ echo "Step 1/3: Generating uniform 8-bit quantization strategy..."
 mkdir -p "${REPO_ROOT}/save/uniform_strategies"
 python "${REPO_ROOT}/utils/create_uniform_strategy.py" --arch $QUANT_MODEL --w_bit 8 --a_bit 8 $FORCE_FIRST_LAST_CLI_ARG --output "${REPO_ROOT}/save/uniform_strategies"
 
+# Check if the command succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to create uniform 8-bit strategy file."
+  exit 1
+fi
+
 UNIFORM_STRATEGY_FILE="${REPO_ROOT}/save/uniform_strategies/${QUANT_MODEL}_w8a8.npy"
 if [ ! -f "$UNIFORM_STRATEGY_FILE" ]; then
   echo "Error: Failed to generate uniform 8-bit strategy file."
@@ -119,6 +128,12 @@ python "${REPO_ROOT}/finetune.py" \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
 
+# Check if training succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: 8-bit quantization fine-tuning failed."
+  exit 1
+fi
+
 # Check if 8-bit model exists
 UNIFORM_MODEL_FILE="${UNIFORM_MODEL_DIR}/model_best.pth.tar"
 if [ ! -f "$UNIFORM_MODEL_FILE" ]; then
@@ -139,6 +154,12 @@ UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --amp \
     --gpu_id $GPU_ID \
   --strategy_file $UNIFORM_STRATEGY_FILE 2>&1 | tee /dev/tty)
+
+# Check if evaluation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: 8-bit model evaluation failed."
+  exit 1
+fi
 
 # Extract the 8-bit model accuracy
 UNIFORM_8BIT_ACCURACY=$(echo "$UNIFORM_EVAL_OUTPUT" | grep -oP "Test Acc:\s+\K[0-9\.]+")

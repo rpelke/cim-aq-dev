@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Model evaluation and analysis functions for CIM-AQ workflows
 # This library provides functions for evaluating models and extracting accuracy metrics
 
@@ -74,6 +77,8 @@ evaluate_stage_models() {
   local final_model_file="${!final_model_var}"
   local strategy_file="${!strategy_var}"
 
+  local evaluation_failed=false
+
   # Evaluate FP32 baseline model
   if [ -f "$fp32_model_file" ]; then
     local fp32_strategy_file="${repo_root}/save/uniform_strategies/${FP32_MODEL}_w8a8.npy"
@@ -84,6 +89,9 @@ evaluate_stage_models() {
       eval "$fp32_results"
       declare -g "${stage_name}_BASELINE_ACCURACY=$ACCURACY"
       declare -g "${stage_name}_BASELINE_ACCURACY5=$ACCURACY5"
+    else
+      echo "Warning: FP32 model evaluation failed for $stage_name" >&2
+      evaluation_failed=true
     fi
   fi
 
@@ -97,6 +105,9 @@ evaluate_stage_models() {
       eval "$int8_results"
       declare -g "${stage_name}_UNIFORM_8BIT_ACCURACY=$ACCURACY"
       declare -g "${stage_name}_UNIFORM_8BIT_ACCURACY5=$ACCURACY5"
+    else
+      echo "Warning: INT8 model evaluation failed for $stage_name" >&2
+      evaluation_failed=true
     fi
   fi
 
@@ -109,8 +120,18 @@ evaluate_stage_models() {
       eval "$final_results"
       declare -g "${stage_name}_FINAL_ACCURACY=$ACCURACY"
       declare -g "${stage_name}_FINAL_ACCURACY5=$ACCURACY5"
+    else
+      echo "Warning: Mixed precision model evaluation failed for $stage_name" >&2
+      evaluation_failed=true
     fi
   fi
+
+  # Return error if any evaluation failed
+  if [ "$evaluation_failed" = true ]; then
+    return 1
+  fi
+
+  return 0
 }
 
 # Print stage results summary

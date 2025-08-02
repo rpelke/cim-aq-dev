@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Results reporting functions for CIM-AQ workflows
 # This library provides functions for generating comprehensive workflow reports
 
@@ -86,7 +89,20 @@ generate_workflow_report() {
   local max_accuracy_drop="$2"
   local enable_large_dataset="$3"
 
-  print_workflow_summary "$config_file" "$enable_large_dataset"
-  print_comprehensive_accuracy_analysis "$max_accuracy_drop" "$enable_large_dataset"
-  print_completion_message "$config_file"
+  if ! print_workflow_summary "$config_file" "$enable_large_dataset"; then
+    echo "Error: Failed to print workflow summary" >&2
+    return 1
+  fi
+
+  if ! print_comprehensive_accuracy_analysis "$max_accuracy_drop" "$enable_large_dataset"; then
+    echo "Error: Failed to print accuracy analysis" >&2
+    return 1
+  fi
+
+  if ! print_completion_message "$config_file"; then
+    echo "Error: Failed to print completion message" >&2
+    return 1
+  fi
+
+  return 0
 }
