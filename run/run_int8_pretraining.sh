@@ -146,6 +146,13 @@ fi
 echo ""
 echo "Step 3/3: Evaluating the 8-bit quantized model..."
 # Run the evaluation, display output to console and capture it
+# Use /dev/tty if available (normal terminal), otherwise use stdout (Docker)
+if [ bash -c ": >/dev/tty" >/dev/null 2>/dev/null ]; then
+  TEE_TARGET="/dev/tty"
+else
+  TEE_TARGET="/dev/stdout"
+fi
+
 UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     -a $QUANT_MODEL \
     -d $DATASET_ROOT \
@@ -156,7 +163,7 @@ UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --resume $UNIFORM_MODEL_FILE \
     --amp \
     --gpu_id $GPU_ID \
-  --strategy_file $UNIFORM_STRATEGY_FILE 2>&1 | tee /dev/tty)
+  --strategy_file $UNIFORM_STRATEGY_FILE 2>&1 | tee $TEE_TARGET)
 
 # Check if evaluation succeeded
 if [ $? -ne 0 ]; then

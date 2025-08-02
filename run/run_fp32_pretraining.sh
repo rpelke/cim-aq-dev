@@ -157,6 +157,13 @@ fi
 echo ""
 echo "Step 4/4: Evaluating FP32 model to get baseline accuracy..."
 # Run the evaluation with non-quantized model
+# Use /dev/tty if available (normal terminal), otherwise use stdout (Docker)
+if [ bash -c ": >/dev/tty" >/dev/null 2>/dev/null ]; then
+  TEE_TARGET="/dev/tty"
+else
+  TEE_TARGET="/dev/stdout"
+fi
+
 EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     -a $FP32_MODEL \
     -d $DATASET_ROOT \
@@ -166,7 +173,7 @@ EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --workers $NUM_WORKERS \
     --strategy_file $FP32_STRATEGY_FILE \
     --gpu_id $GPU_ID \
-  --resume $FP32_MODEL_FILE 2>&1 | tee /dev/tty)
+  --resume $FP32_MODEL_FILE 2>&1 | tee $TEE_TARGET)
 
 # Check if evaluation succeeded
 if [ $? -ne 0 ]; then

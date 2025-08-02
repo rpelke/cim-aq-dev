@@ -125,6 +125,13 @@ fi
 echo ""
 echo "Step 2/2: Evaluating the final quantized model..."
 # Run the evaluation, display output to console and capture it
+# Use /dev/tty if available (normal terminal), otherwise use stdout (Docker)
+if [ bash -c ": >/dev/tty" >/dev/null 2>/dev/null ]; then
+  TEE_TARGET="/dev/tty"
+else
+  TEE_TARGET="/dev/stdout"
+fi
+
 FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     -a $QUANT_MODEL \
     -d $DATASET_ROOT \
@@ -135,7 +142,7 @@ FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
     --resume $FINAL_MODEL_FILE \
     --gpu_id $GPU_ID \
     --amp \
-  --strategy_file $STRATEGY_FILE 2>&1 | tee /dev/tty)
+  --strategy_file $STRATEGY_FILE 2>&1 | tee $TEE_TARGET)
 
 # Check if evaluation succeeded
 if [ $? -ne 0 ]; then
