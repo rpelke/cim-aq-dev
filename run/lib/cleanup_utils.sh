@@ -14,7 +14,7 @@ set -euo pipefail
 # This library provides functions for cleaning up intermediate files safely
 
 # Track directories created in this run to avoid cleaning up other experiments
-declare -a CREATED_CHECKPOINT_DIRS
+declare -a CREATED_CHECKPOINT_DIRS=()
 
 # Register a checkpoint directory as created in this run
 register_checkpoint_dir() {
@@ -67,7 +67,7 @@ cleanup_intermediate_files() {
   # Clean based on targets - only in directories we created
   if [[ "$targets" == *"checkpoints"* ]] || [[ "$targets" == *"all"* ]]; then
     echo "   → Cleaning checkpoint files (only in directories created this run)..."
-    for dir in "${CREATED_CHECKPOINT_DIRS[@]}"; do
+    for dir in "${CREATED_CHECKPOINT_DIRS[@]+"${CREATED_CHECKPOINT_DIRS[@]}"}"; do
       if [ -d "$dir" ]; then
         find "$dir" -name "checkpoint.pth.tar" -type f -delete 2>/dev/null || true
       fi
@@ -76,7 +76,7 @@ cleanup_intermediate_files() {
 
   if [[ "$targets" == *"logs"* ]] || [[ "$targets" == *"all"* ]]; then
     echo "   → Cleaning log directories (only in directories created this run)..."
-    for dir in "${CREATED_CHECKPOINT_DIRS[@]}"; do
+    for dir in "${CREATED_CHECKPOINT_DIRS[@]+"${CREATED_CHECKPOINT_DIRS[@]}"}"; do
       if [ -d "$dir" ]; then
         find "$dir" -name "logs" -type d -exec rm -rf {} + 2>/dev/null || true
       fi
@@ -92,7 +92,7 @@ cleanup_intermediate_files() {
 
   # Show remaining disk usage for directories we created
   echo "   📊 Checkpoint directory sizes after cleanup:"
-  for dir in "${CREATED_CHECKPOINT_DIRS[@]}"; do
+  for dir in "${CREATED_CHECKPOINT_DIRS[@]+"${CREATED_CHECKPOINT_DIRS[@]}"}"; do
     if [ -d "$dir" ]; then
       du -sh "$dir" 2>/dev/null || true
     fi
