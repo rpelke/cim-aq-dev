@@ -125,6 +125,23 @@ def parse_config(config_path: Path, repo_root: Path) -> None:
         wandb_enable = str(wandb_config.get('enable', False)).lower()
         wandb_project = wandb_config.get('project', 'cim-aq-quantization')
 
+        # DataLoader configuration
+        dataloader_config = config.get('dataloader', {})
+        batch_size = str(dataloader_config.get('batch_size', 256))
+        num_workers = str(dataloader_config.get('num_workers', 32))
+
+        # Space management configuration
+        space_config = config.get('space_management', {})
+        enable_cleanup = str(space_config.get('enable_cleanup', False)).lower()
+        cleanup_frequency = space_config.get('cleanup_frequency', 'end')
+
+        # Handle cleanup_targets as either string or list
+        cleanup_targets = space_config.get('cleanup_targets', 'checkpoints')
+        if isinstance(cleanup_targets, list):
+            cleanup_targets_str = ','.join(cleanup_targets)
+        else:
+            cleanup_targets_str = str(cleanup_targets)
+
     except Exception as e:
         print(f"Error: Failed to extract configuration values: {e}")
         sys.exit(1)
@@ -162,6 +179,13 @@ def parse_config(config_path: Path, repo_root: Path) -> None:
     print(f'LARGE_FP32_LEARNING_RATE="{large_fp32_lr}"')
     print(f'LARGE_INT8_LEARNING_RATE="{large_int8_lr}"')
     print(f'LARGE_MP_LEARNING_RATE="{large_mp_lr}"')
+    # DataLoader configuration variables
+    print(f'BATCH_SIZE="{batch_size}"')
+    print(f'NUM_WORKERS="{num_workers}"')
+    # Space management configuration variables
+    print(f'ENABLE_CLEANUP="{enable_cleanup}"')
+    print(f'CLEANUP_FREQUENCY="{cleanup_frequency}"')
+    print(f'CLEANUP_TARGETS="{cleanup_targets_str}"')
 
 
 def main() -> None:

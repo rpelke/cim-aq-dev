@@ -1,13 +1,13 @@
 ---
-name: Code Formatting Check and Fix
+name: Style
 on:
   push:
     branches: ['**']
   pull_request:
     branches: [main]
   schedule:
-    # Run daily at 6 AM UTC to catch any formatting drift
-    - cron: 0 6 * * *
+    # Run weekly on Sunday night at 6 AM UTC to catch any formatting drift
+    - cron: 0 6 * * 0
 jobs:
   format-check:
     runs-on: ubuntu-latest

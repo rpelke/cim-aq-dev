@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -15,8 +18,8 @@ REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 # 1. Fine-tune the model with the best mixed precision strategy
 # 2. Evaluate the final quantized model
 
-# Usage: bash run_mp_finetuning.sh [quant_model] [dataset] [dataset_root] [finetune_epochs] [strategy_file] [output_suffix] [learning_rate] [uniform_model_file] [wandb_enable] [wandb_project] [gpu_id]
-# Example: bash run_mp_finetuning.sh qvgg16 imagenet100 /path/to/dataset 30 /path/to/strategy.npy custom_run 0.0005 /path/to/uniform/model.pth.tar false cim-aq-quantization 1
+# Usage: bash run_mp_finetuning.sh [quant_model] [dataset] [dataset_root] [finetune_epochs] [strategy_file] [output_suffix] [learning_rate] [uniform_model_file] [wandb_enable] [wandb_project] [gpu_id] [batch_size] [num_workers]
+# Example: bash run_mp_finetuning.sh qvgg16 imagenet100 /path/to/dataset 30 /path/to/strategy.npy custom_run 0.0005 /path/to/uniform/model.pth.tar false cim-aq-quantization 1 256 32
 
 # Default values
 QUANT_MODEL=${1:-"qvgg16"}                          # Quantized model architecture
@@ -30,6 +33,8 @@ UNIFORM_MODEL_FILE=${8:-"${REPO_ROOT}/checkpoints/${QUANT_MODEL}_per-tensor_unif
 WANDB_ENABLE=${9:-"false"}                          # Enable W&B logging
 WANDB_PROJECT=${10:-"cim-aq-quantization"}          # W&B project name
 GPU_ID=${11:-"1"}                                   # GPU ID(s) for CUDA_VISIBLE_DEVICES
+BATCH_SIZE=${12:-"256"}                             # Batch size for training
+NUM_WORKERS=${13:-"32"}                             # Number of DataLoader workers
 
 if [[ "$WANDB_ENABLE" == "true" || "$WANDB_ENABLE" == "True" || "$WANDB_ENABLE" == "1" ]]; then
   WANDB_CLI_ARG="--wandb_enable"
@@ -93,9 +98,8 @@ python "${REPO_ROOT}/finetune.py" \
   --lr $LEARNING_RATE \
   --lr_type cos \
   --wd 0.0001 \
-  --train_batch 256 \
-  --test_batch 512 \
-  --workers 32 \
+  --batch_size $BATCH_SIZE \
+  --workers $NUM_WORKERS \
   --pretrained \
   --checkpoint "$CHECKPOINT_DIR" \
   --amp \
@@ -103,6 +107,12 @@ python "${REPO_ROOT}/finetune.py" \
   --strategy_file $STRATEGY_FILE \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
+
+# Check if training succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Mixed precision fine-tuning failed."
+  exit 1
+fi
 
 # Check if fine-tuned model exists
 FINAL_MODEL_FILE="${CHECKPOINT_DIR}/model_best.pth.tar"
@@ -114,24 +124,64 @@ fi
 # Step 2: Evaluate the quantized model
 echo ""
 echo "Step 2/2: Evaluating the final quantized model..."
-# Run the evaluation, display output to console and capture it
-FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
-    -a $QUANT_MODEL \
-    -d $DATASET_ROOT \
-    --data_name $DATASET \
-    --evaluate \
-    --resume $FINAL_MODEL_FILE \
-    --gpu_id $GPU_ID \
-    --amp \
-  --strategy_file $STRATEGY_FILE 2>&1 | tee /dev/tty)
+
+# Run the evaluation
+# Use /dev/tty if available (normal terminal), otherwise just capture output
+if [ -t 0 ] && [ -w /dev/tty ]; then
+  # `/dev/tty` available - show live output and capture
+  FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
+      -a $QUANT_MODEL \
+      -d $DATASET_ROOT \
+      --data_name $DATASET \
+      --evaluate \
+      --batch_size $BATCH_SIZE \
+      --workers $NUM_WORKERS \
+      --resume $FINAL_MODEL_FILE \
+      --gpu_id $GPU_ID \
+      --amp \
+    --strategy_file $STRATEGY_FILE 2>&1 | tee /dev/tty)
+else
+  # No interactive terminal (CI/batch) - capture output and show afterward
+  FINAL_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
+      -a $QUANT_MODEL \
+      -d $DATASET_ROOT \
+      --data_name $DATASET \
+      --evaluate \
+      --batch_size $BATCH_SIZE \
+      --workers $NUM_WORKERS \
+      --resume $FINAL_MODEL_FILE \
+      --gpu_id $GPU_ID \
+      --amp \
+    --strategy_file $STRATEGY_FILE 2>&1)
+
+  # Show the captured output
+  echo "=== Mixed Precision Model Evaluation Output ==="
+  echo "$FINAL_EVAL_OUTPUT"
+  echo "==============================================="
+fi
+
+# Check if evaluation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Mixed precision model evaluation failed."
+  exit 1
+fi
 
 # Try to extract the final accuracy
-FINAL_ACCURACY=$(echo "$FINAL_EVAL_OUTPUT" | grep -oP "Test Acc:\s+\K[0-9\.]+")
-FINAL_ACCURACY5=$(echo "$FINAL_EVAL_OUTPUT" | grep -oP "Test Acc5:\s+\K[0-9\.]+")
+FINAL_ACCURACY=$(echo "$FINAL_EVAL_OUTPUT" | grep -oP "Test Acc:\s*\K[0-9\.]+")
+FINAL_ACCURACY5=$(echo "$FINAL_EVAL_OUTPUT" | grep -oP "Test Acc5:\s*\K[0-9\.]+")
+
+# Validate that extraction worked
+if [ -z "$FINAL_ACCURACY" ] || [ -z "$FINAL_ACCURACY5" ]; then
+  echo "Warning: Failed to extract accuracy from evaluation output" >&2
+  echo "Evaluation output (last 10 lines):" >&2
+  echo "$FINAL_EVAL_OUTPUT" | tail -10 >&2
+  FINAL_ACCURACY="Unknown"
+  FINAL_ACCURACY5="Unknown"
+fi
 
 echo ""
 echo "========================================================="
 echo "Mixed precision fine-tuning complete!"
 echo "Final mixed precision model: $FINAL_MODEL_FILE"
-echo "Final accuracy with mixed precision: $FINAL_ACCURACY% (Top-5: $FINAL_ACCURACY5%)"
+echo "Final accuracy with mixed precision: ${FINAL_ACCURACY}% (Top-5: ${FINAL_ACCURACY5}%)"
 echo "========================================================="

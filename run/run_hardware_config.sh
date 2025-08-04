@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # This script generates a latency lookup table for a model using the hardware configuration
 # Usage: bash run_hardware_config.sh [model_name] [max_bit] [layer_dims_file] [hardware_config_file]
 # Example: bash run_hardware_config.sh qvgg16 8 vgg16_layer_dimensions.yaml hardware_config.yaml
@@ -48,6 +51,12 @@ python ${REPO_ROOT}/lib/simulator/create_custom_latency_table.py \
   --max_bit $MAX_BIT \
   --layer_dims_yaml $LAYER_DIMS_PATH \
   --hardware_config_yaml $HARDWARE_CONFIG_PATH
+
+# Check if latency table generation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Latency table generation failed."
+  exit 1
+fi
 
 echo "Latency table generation complete."
 echo "The table is saved in ${REPO_ROOT}/lib/simulator/lookup_tables/${MODEL_NAME}_batch1_latency_table.npy"

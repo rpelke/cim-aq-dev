@@ -1,0 +1,148 @@
+---
+name: Cleanup PR Containers
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  cleanup:
+    # Ensure the GITHUB_TOKEN has read/write access to packages and write access to issues
+    permissions:
+      contents: read
+      packages: write
+      issues: write
+    runs-on: ubuntu-latest
+
+    # Only run in the base repository, not in forks
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Delete PR & branch container images
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |-
+            const { number: prNumber, head, merged: isMerged } = context.payload.pull_request;
+            const owner     = context.repo.owner;
+            const repo      = context.repo.repo;
+            const tagPr     = `pr-${prNumber}`;
+            const branch    = head.ref;
+            const pkgName   = repo;
+            const results   = [];
+            console.log(`🔍 Cleanup triggered for PR  #${prNumber} (branch="${branch}", merged=${isMerged})`);
+            // Function to list all container package versions, trying org packages first then user packages
+            const listVersions = async () => {
+              try {
+                return await github.paginate(
+                  github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
+                  { package_type: 'container', package_name: pkgName, org: owner, per_page: 100 },
+                  resp => resp.data
+                );
+              } catch {
+                // Fallback to user-owned packages if org call fails
+                return await github.paginate(
+                  github.rest.packages.getAllPackageVersionsForPackageOwnedByAuthenticatedUser,
+                  { package_type: 'container', package_name: pkgName, per_page: 100 },
+                  resp => resp.data
+                );
+              }
+            };
+            // Function to delete a container package version by tag and return status
+            async function deleteByTag(tag, label) {
+              try {
+                const versions = await listVersions();
+                const match = versions.find(v =>
+                  v.metadata?.container?.tags?.includes(tag)
+                );
+                if (!match) {
+                  console.log(`ℹ️  No ${label} found for tag="${tag}"`);
+                  return { ok: true, found: false, tag, label };
+                }
+                
+                // Determine parameters for org vs. user package deletion
+                const params = match.owner === owner
+                  ? { // Org-owned package
+                      package_type: 'container',
+                      package_name: pkgName,
+                      org: owner,
+                      package_version_id: match.id
+                    }
+                  : { // User-owned package
+                      package_type: 'container',
+                      package_name: pkgName,
+                      package_version_id: match.id
+                    };
+                
+                // Delete via the appropriate API endpoint
+                await github.rest.packages.deletePackageVersionForOrg?.(params)
+                  ?? await github.rest.packages.deletePackageVersionForAuthenticatedUser(params);
+                
+                console.log(`✅ Deleted ${label} tag="${tag}"`);
+                return { ok: true, found: true, tag, label };
+                
+              } catch (err) {
+                if (err.status === 404) {
+                  console.log(`ℹ️  ${label} already gone for tag="${tag}"`);
+                  return { ok: true, found: false, tag, label };
+                }
+                if (err.status === 403) {
+                  console.error(`🚫 Permission denied deleting ${label} tag="${tag}"`);
+                  return { ok: false, found: false, tag, label, error: '403 Forbidden' };
+                }
+                console.error(`⚠️  Error deleting ${label} tag="${tag}": ${err.message}`);
+                return { ok: false, found: false, tag, label, error: err.message };
+              }
+            }
+            try {
+              // Delete the PR container image
+              results.push(await deleteByTag(tagPr, 'PR container'));
+              // If the PR was merged and branch is not main, delete the branch container image too
+              if (isMerged && branch !== 'main') {
+                results.push(await deleteByTag(branch, 'branch container'));
+              }
+              // Build the summary comment body
+              let body = "🧹 **Container Cleanup Summary**\n\n"
+                + (isMerged
+                    ? "✅ **PR was merged** — deleting both PR and branch containers\n\n"
+                    : "❌ **PR closed without merge** — deleting PR container only\n\n");
+              const deleted     = results.filter(r => r.ok && r.found);
+              const notFound    = results.filter(r => r.ok && !r.found);
+              const errors      = results.filter(r => !r.ok);
+              if (deleted.length) {
+                body += "**Deleted:**\n"
+                  + deleted.map(r => `- ✅ ${r.label}: \`ghcr.io/${owner}/${repo}:${r.tag}\``).join('\n')
+                  + "\n\n";
+              }
+              if (notFound.length) {
+                body += "**Not found:**\n"
+                  + notFound.map(r => `- ℹ️ ${r.label}: \`ghcr.io/${owner}/${repo}:${r.tag}\``).join('\n')
+                  + "\n\n";
+              }
+              if (errors.length) {
+                body += "**Errors:**\n"
+                  + errors.map(r => `- ⚠️ ${r.label}: \`ghcr.io/${owner}/${repo}:${r.tag}\` — ${r.error}`).join('\n')
+                  + "\n\n";
+              }
+              if (isMerged && branch === 'main') {
+                body += "ℹ️ **Note:** Branch `main` is protected and was not deleted.\n\n";
+              }
+              // Post the summary comment on the PR
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body
+              });
+            } catch (overallErr) {
+              console.error(`❗ Unexpected error during cleanup: ${overallErr.message}`);
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: [
+                  "🧹 **Container Cleanup Failed**",
+                  "",
+                  `Error: ${overallErr.message}`,
+                  "",
+                  "Please check and remove container images manually if necessary."
+                ].join('\n')
+              });
+            }

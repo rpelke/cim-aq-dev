@@ -63,7 +63,7 @@ parser.add_argument('-j',
                     default=16,
                     type=int,
                     metavar='N',
-                    help='number of data loading workers (default: 4)')
+                    help='number of data loading workers (default: 16)')
 # Optimization options
 parser.add_argument('--epochs',
                     default=100,
@@ -80,16 +80,11 @@ parser.add_argument('--warmup_epoch',
                     type=int,
                     metavar='N',
                     help='manual warmup epoch number (useful on restarts)')
-parser.add_argument('--train_batch',
+parser.add_argument('--batch_size',
                     default=256,
                     type=int,
                     metavar='N',
-                    help='train batchsize (default: 256)')
-parser.add_argument('--test_batch',
-                    default=512,
-                    type=int,
-                    metavar='N',
-                    help='test batchsize (default: 512)')
+                    help='batch size  (default: 256)')
 parser.add_argument('--lr',
                     '--learning-rate',
                     default=0.1,
@@ -355,7 +350,7 @@ if __name__ == '__main__':
 
     train_loader, val_loader, n_class = get_dataset(
         dataset_name=args.data_name,
-        batch_size=args.train_batch,
+        batch_size=args.batch_size,
         n_worker=args.workers,
         data_root=args.data)
 
@@ -442,7 +437,7 @@ if __name__ == '__main__':
         test_loss, test_acc, test_acc5 = test(val_loader, model, criterion,
                                               start_epoch, device)
         main_logger.info(
-            f' Test Loss:  {test_loss:.8f}, Test Acc:  {test_acc:.4f}, Test Acc5: {test_acc5:.4f}'
+            f' Test Loss:  {test_loss:.8f}, Test Acc:  {test_acc:.4f}, Test Acc5:  {test_acc5:.4f}'
         )
         exit()
 

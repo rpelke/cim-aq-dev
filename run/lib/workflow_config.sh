@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Configuration management functions for CIM-AQ workflows
 # This library provides functions for parsing YAML configs and setting up workflow variables
 
@@ -151,6 +154,16 @@ print_workflow_config() {
     echo "└─ W&B project: $WANDB_PROJECT"
   else
     echo "└─ W&B logging: DISABLED"
+  fi
+
+  echo ""
+  echo "🧹 SPACE MANAGEMENT CONFIGURATION:"
+  if [ "$ENABLE_CLEANUP" = "true" ]; then
+    echo "├─ Cleanup enabled: YES"
+    echo "├─ Cleanup frequency: $CLEANUP_FREQUENCY"
+    echo "└─ Cleanup targets: $CLEANUP_TARGETS"
+  else
+    echo "└─ Cleanup enabled: NO"
   fi
   echo "========================================================="
 }

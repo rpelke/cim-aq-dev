@@ -7,6 +7,9 @@
 # found in the root directory of this source tree.                           #
 ##############################################################################
 
+# Exit on any error, undefined variable, or pipe failure
+set -euo pipefail
+
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -16,8 +19,8 @@ REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 # 2. Fine-tune the model with uniform 8-bit quantization using FP32 model as base
 # 3. Evaluate the 8-bit quantized model
 
-# Usage: bash run_int8_pretraining.sh [quant_model] [fp32_model] [dataset] [dataset_root] [uniform_8bit_epochs] [force_first_last_layer] [dataset_suffix] [learning_rate] [wandb_enable] [wandb_project] [gpu_id]
-# Example: bash run_int8_pretraining.sh qvgg16 custom_vgg16 imagenet100 /path/to/dataset 10 true imagenet100 0.001 false cim-aq-quantization 1
+# Usage: bash run_int8_pretraining.sh [quant_model] [fp32_model] [dataset] [dataset_root] [uniform_8bit_epochs] [force_first_last_layer] [dataset_suffix] [learning_rate] [wandb_enable] [wandb_project] [gpu_id] [batch_size] [num_workers]
+# Example: bash run_int8_pretraining.sh qvgg16 custom_vgg16 imagenet100 /path/to/dataset 10 true imagenet100 0.001 false cim-aq-quantization 1 256 32
 
 # Default values
 QUANT_MODEL=${1:-"qvgg16"}                          # Quantized model architecture
@@ -31,6 +34,8 @@ LEARNING_RATE=${8:-"0.001"}                         # Learning rate for INT8 mod
 WANDB_ENABLE=${9:-"false"}                          # Enable W&B logging
 WANDB_PROJECT=${10:-"cim-aq-quantization"}          # W&B project name
 GPU_ID=${11:-"1"}                                   # GPU ID(s) for CUDA_VISIBLE_DEVICES
+BATCH_SIZE=${12:-"256"}                             # Batch size for training
+NUM_WORKERS=${13:-"32"}                             # Number of DataLoader workers
 
 # Convert string to boolean for Python scripts
 if [[ "$FORCE_FIRST_LAST_LAYER" == "true" || "$FORCE_FIRST_LAST_LAYER" == "True" || "$FORCE_FIRST_LAST_LAYER" == "1" ]]; then
@@ -79,6 +84,12 @@ echo "Step 1/3: Generating uniform 8-bit quantization strategy..."
 mkdir -p "${REPO_ROOT}/save/uniform_strategies"
 python "${REPO_ROOT}/utils/create_uniform_strategy.py" --arch $QUANT_MODEL --w_bit 8 --a_bit 8 $FORCE_FIRST_LAST_CLI_ARG --output "${REPO_ROOT}/save/uniform_strategies"
 
+# Check if the command succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to create uniform 8-bit strategy file."
+  exit 1
+fi
+
 UNIFORM_STRATEGY_FILE="${REPO_ROOT}/save/uniform_strategies/${QUANT_MODEL}_w8a8.npy"
 if [ ! -f "$UNIFORM_STRATEGY_FILE" ]; then
   echo "Error: Failed to generate uniform 8-bit strategy file."
@@ -108,9 +119,8 @@ python "${REPO_ROOT}/finetune.py" \
   --lr $LEARNING_RATE \
   --lr_type cos \
   --wd 0.0001 \
-  --train_batch 256 \
-  --test_batch 512 \
-  --workers 32 \
+  --batch_size $BATCH_SIZE \
+  --workers $NUM_WORKERS \
   --pretrained \
   --checkpoint $UNIFORM_MODEL_DIR \
   --strategy_file $UNIFORM_STRATEGY_FILE \
@@ -118,6 +128,12 @@ python "${REPO_ROOT}/finetune.py" \
   --gpu_id $GPU_ID \
   $WANDB_CLI_ARG \
   --wandb_project "$WANDB_PROJECT"
+
+# Check if training succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: 8-bit quantization fine-tuning failed."
+  exit 1
+fi
 
 # Check if 8-bit model exists
 UNIFORM_MODEL_FILE="${UNIFORM_MODEL_DIR}/model_best.pth.tar"
@@ -129,25 +145,66 @@ fi
 # Step 3: Evaluate the 8-bit quantized model
 echo ""
 echo "Step 3/3: Evaluating the 8-bit quantized model..."
-# Run the evaluation, display output to console and capture it
-UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
-    -a $QUANT_MODEL \
-    -d $DATASET_ROOT \
-    --data_name $DATASET \
-    --evaluate \
-    --resume $UNIFORM_MODEL_FILE \
-    --amp \
-    --gpu_id $GPU_ID \
-  --strategy_file $UNIFORM_STRATEGY_FILE 2>&1 | tee /dev/tty)
+
+# Run the evaluation
+# Use /dev/tty if available (normal terminal), otherwise just capture output
+if [ -t 0 ] && [ -w /dev/tty ]; then
+  # `/dev/tty` available - show live output and capture
+  UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
+      -a $QUANT_MODEL \
+      -d $DATASET_ROOT \
+      --data_name $DATASET \
+      --evaluate \
+      --batch_size $BATCH_SIZE \
+      --workers $NUM_WORKERS \
+      --resume $UNIFORM_MODEL_FILE \
+      --amp \
+      --gpu_id $GPU_ID \
+    --strategy_file $UNIFORM_STRATEGY_FILE 2>&1 | tee /dev/tty)
+else
+  # No interactive terminal (CI/batch) - capture output and show afterward
+  UNIFORM_EVAL_OUTPUT=$(python "${REPO_ROOT}/finetune.py" \
+      -a $QUANT_MODEL \
+      -d $DATASET_ROOT \
+      --data_name $DATASET \
+      --evaluate \
+      --batch_size $BATCH_SIZE \
+      --workers $NUM_WORKERS \
+      --resume $UNIFORM_MODEL_FILE \
+      --amp \
+      --gpu_id $GPU_ID \
+    --strategy_file $UNIFORM_STRATEGY_FILE 2>&1)
+
+  # Show the captured output
+  echo "=== 8-bit Model Evaluation Output ==="
+  echo "$UNIFORM_EVAL_OUTPUT"
+  echo "===================================="
+fi
+
+# Check if evaluation succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: 8-bit model evaluation failed."
+  exit 1
+fi
 
 # Extract the 8-bit model accuracy
-UNIFORM_8BIT_ACCURACY=$(echo "$UNIFORM_EVAL_OUTPUT" | grep -oP "Test Acc:\s+\K[0-9\.]+")
-UNIFORM_8BIT_ACCURACY5=$(echo "$UNIFORM_EVAL_OUTPUT" | grep -oP "Test Acc5:\s+\K[0-9\.]+")
-echo "Uniform 8-bit model accuracy: $UNIFORM_8BIT_ACCURACY% (Top-5: $UNIFORM_8BIT_ACCURACY5%)"
+UNIFORM_8BIT_ACCURACY=$(echo "$UNIFORM_EVAL_OUTPUT" | grep -oP "Test Acc:\s*\K[0-9\.]+")
+UNIFORM_8BIT_ACCURACY5=$(echo "$UNIFORM_EVAL_OUTPUT" | grep -oP "Test Acc5:\s*\K[0-9\.]+")
+
+# Validate that extraction worked
+if [ -z "$UNIFORM_8BIT_ACCURACY" ] || [ -z "$UNIFORM_8BIT_ACCURACY5" ]; then
+  echo "Warning: Failed to extract accuracy from evaluation output" >&2
+  echo "Evaluation output (last 10 lines):" >&2
+  echo "$UNIFORM_EVAL_OUTPUT" | tail -10 >&2
+  UNIFORM_8BIT_ACCURACY="Unknown"
+  UNIFORM_8BIT_ACCURACY5="Unknown"
+fi
+
+echo "Uniform 8-bit model accuracy: ${UNIFORM_8BIT_ACCURACY}% (Top-5: ${UNIFORM_8BIT_ACCURACY5}%)"
 
 echo ""
 echo "========================================================="
 echo "INT8 pretraining complete!"
 echo "Uniform 8-bit model: $UNIFORM_MODEL_FILE"
-echo "Uniform 8-bit accuracy: $UNIFORM_8BIT_ACCURACY% (Top-5: $UNIFORM_8BIT_ACCURACY5%)"
+echo "Uniform 8-bit accuracy: ${UNIFORM_8BIT_ACCURACY}% (Top-5: ${UNIFORM_8BIT_ACCURACY5}%)"
 echo "========================================================="
