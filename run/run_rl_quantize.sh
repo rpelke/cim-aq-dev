@@ -97,8 +97,6 @@ ln -sf "$UNIFORM_MODEL_FILE" "${REPO_ROOT}/pretrained/imagenet/${QUANT_MODEL}.pt
 # Step 1: Generate hardware latency lookup table
 echo ""
 echo "Step 1/2: Generating hardware latency lookup table..."
-# Make the hardware config script executable
-chmod +x "${SCRIPT_DIR}/run_hardware_config.sh"
 
 # Determine layer dimensions file based on model name
 LAYER_DIMS_FILE="${BASE_MODEL_NAME}_layer_dimensions.yaml"

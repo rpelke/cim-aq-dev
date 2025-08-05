@@ -27,28 +27,6 @@ CIM-AQ is based on the [HAQ framework](https://github.com/mit-han-lab/haq), modi
 - `pretrain.py` - Pretraining models
 - `rl_quantize.py` - RL-based quantization search
 
-## Dependencies
-
-The current codebase is tested under the following environment:
-
-- Python 3.11.2
-- PyTorch 2.7.1 (CUDA 12)
-- Brevitas 0.12.0
-- ONNX 1.18.0
-- ONNX Optimizer 0.3.13
-- torchvision 0.22.1
-- Matplotlib 3.10.5
-- SciPy 1.16.1
-- TensorBoard 2.20.0
-- tqdm 4.67.1
-- W&B 0.21.0
-
-You can install the required dependencies using the provided `requirements.txt` file:
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Docker
 
 For consistent environments and easy deployment, we provide a Docker image for CIM-AQ and a simple script to run it:
@@ -87,6 +65,29 @@ This project is designed to run rootless, so you can also use `podman`. Make sur
 - `ghcr.io/jmkle/cim-aq:pr-<number>` (PRs, auto-cleaned)
 
 **GPU Requirements:** [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) + CUDA 12.9.1 compatible drivers
+
+## Dependencies
+
+The current codebase is tested under the following environment:
+
+- Python 3.11.2
+- PyTorch 2.7.1 (CUDA 12)
+- Brevitas 0.12.0
+- ONNX 1.18.0
+- ONNX Optimizer 0.3.13
+- torchvision 0.22.1
+- Matplotlib 3.10.5
+- SciPy 1.16.1
+- Pillow 11.3.0
+- TensorBoard 2.20.0
+- tqdm 4.67.1
+- W&B 0.21.0
+
+You can install the required dependencies using the provided `requirements.txt` file:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Continuous Integration & Deployment
 
@@ -244,10 +245,11 @@ brevitas>=0.12.0
 matplotlib>=3.10.5
 onnx>=1.18.0
 onnxoptimizer>=0.3.13
+pillow>=11.3.0
 scipy>=1.16.1
 tensorboard>=2.20.0
 torch>=2.7.1
 torchvision>=0.22.1
 tqdm>=4.67.1
-wandb
+wandb>=0.21.0
 ```
