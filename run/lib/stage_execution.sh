@@ -51,7 +51,6 @@ execute_stage() {
   local fp32_epochs_var="${prefix}_FP32_EPOCHS"
   local int8_epochs_var="${prefix}_8BIT_EPOCHS"
   local finetune_epochs_var="${prefix}_FINETUNE_EPOCHS"
-  local rl_output_var="${prefix}_RL_OUTPUT_SUFFIX"
   local mp_output_var="${prefix}_MP_OUTPUT_SUFFIX"
 
   local fp32_model_file="${!fp32_model_var}"
@@ -59,8 +58,14 @@ execute_stage() {
   local fp32_epochs="${!fp32_epochs_var}"
   local int8_epochs="${!int8_epochs_var}"
   local finetune_epochs="${!finetune_epochs_var}"
-  local rl_output_suffix="${!rl_output_var}"
   local mp_output_suffix="${!mp_output_var}"
+
+  # RL output suffix only exists for small dataset (Stage 1) since RL search is skipped in Stage 2
+  local rl_output_suffix=""
+  if [ "$skip_rl" = "false" ]; then
+    local rl_output_var="${prefix}_RL_OUTPUT_SUFFIX"
+    rl_output_suffix="${!rl_output_var}"
+  fi
 
   # Determine dataset-specific learning rates
   local fp32_lr_var="${prefix}_FP32_LEARNING_RATE"
