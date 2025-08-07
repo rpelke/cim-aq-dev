@@ -67,12 +67,14 @@ def get_torchvision_pretrained_model(model_name, num_classes):
                 )
 
             # ResNet, DenseNet, etc. with fc layer
-            elif hasattr(pretrained_model, 'fc'):
+            elif hasattr(pretrained_model, 'fc') and isinstance(
+                    pretrained_model.fc, nn.Linear):
                 in_features = pretrained_model.fc.in_features
                 pretrained_model.fc = nn.Linear(in_features, num_classes)
                 # Proper initialization
                 nn.init.normal_(pretrained_model.fc.weight, 0, 0.01)
-                nn.init.constant_(pretrained_model.fc.bias, 0)
+                if pretrained_model.fc.bias is not None:
+                    nn.init.constant_(pretrained_model.fc.bias, 0)
                 logger.info(
                     f"FC layer initialized: {in_features} -> {num_classes} with normal(0, 0.01)"
                 )
@@ -84,7 +86,8 @@ def get_torchvision_pretrained_model(model_name, num_classes):
                 pretrained_model.classifier = nn.Linear(
                     in_features, num_classes)
                 nn.init.normal_(pretrained_model.classifier.weight, 0, 0.01)
-                nn.init.constant_(pretrained_model.classifier.bias, 0)
+                if pretrained_model.classifier.bias is not None:
+                    nn.init.constant_(pretrained_model.classifier.bias, 0)
                 logger.info(
                     f"Classifier initialized: {in_features} -> {num_classes} with normal(0, 0.01)"
                 )
@@ -101,7 +104,9 @@ def get_torchvision_pretrained_model(model_name, num_classes):
                     # Initialize final conv layer
                     nn.init.normal_(pretrained_model.classifier[1].weight, 0,
                                     0.01)
-                    nn.init.constant_(pretrained_model.classifier[1].bias, 0)
+                    if pretrained_model.classifier[1].bias is not None:
+                        nn.init.constant_(pretrained_model.classifier[1].bias,
+                                          0)
                     logger.info(
                         f"SqueezeNet classifier initialized for {num_classes} classes"
                     )
@@ -114,13 +119,33 @@ def get_torchvision_pretrained_model(model_name, num_classes):
                             in_features, num_classes)
                         nn.init.normal_(pretrained_model.classifier[-1].weight,
                                         0, 0.01)
+                    if pretrained_model.classifier[-1].bias is not None:
                         nn.init.constant_(pretrained_model.classifier[-1].bias,
                                           0)
-                        model_type = "VGG" if model_name.startswith(
-                            'vgg') else "Sequential"
+                    model_type = "VGG" if model_name.startswith(
+                        'vgg') else "Sequential"
+                    logger.info(
+                        f"{model_type} classifier's last layer initialized: {in_features} -> {num_classes} with normal(0, 0.01)"
+                    )
+
+            # For models with heads attribute (e.g., Vision Transformers)
+            elif hasattr(pretrained_model, 'heads') and isinstance(
+                    pretrained_model.heads, nn.Sequential):
+                for i in range(len(pretrained_model.heads) - 1, -1, -1):
+                    layer = pretrained_model.heads[i]
+                    if isinstance(layer, nn.Linear):
+                        in_features = layer.in_features
+                        pretrained_model.heads[i] = nn.Linear(
+                            in_features, num_classes)
+                        nn.init.normal_(pretrained_model.heads[i].weight, 0,
+                                        0.01)
+                        if pretrained_model.heads[i].bias is not None:
+                            nn.init.constant_(pretrained_model.heads[i].bias,
+                                              0)
                         logger.info(
-                            f"{model_type} classifier's last layer initialized: {in_features} -> {num_classes} with normal(0, 0.01)"
+                            f"Transformer head initialized: {in_features} -> {num_classes} with normal(0, 0.01)"
                         )
+                        break
 
             else:
                 logger.warning(
