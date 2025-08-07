@@ -13,8 +13,30 @@ from typing import Any
 import onnx
 import torch
 from brevitas.export import export_onnx_qcdq
+from brevitas.nn import QuantConv2d, QuantLinear, QuantMultiheadAttention
 
 from lib.utils.logger import logger
+
+
+def has_brevitas_layers(model: torch.nn.Module) -> bool:
+    """
+    Check if the model contains any Brevitas quantized layers.
+    
+    Args:
+        model (torch.nn.Module): The model to check for Brevitas layers.
+    
+    Returns:
+        bool: True if the model contains Brevitas quantized layers, False otherwise.
+    """
+    brevitas_layer_types = (QuantConv2d, QuantLinear, QuantMultiheadAttention)
+
+    for module in model.modules():
+        if isinstance(module, brevitas_layer_types):
+            logger.info(f"Found Brevitas layer: {type(module).__name__}")
+            return True
+
+    logger.info("No Brevitas layers found in model")
+    return False
 
 
 def load_best_model(model: torch.nn.Module,
@@ -99,9 +121,15 @@ def upload_models_to_wandb(wandb_run: Any, checkpoint_path: str) -> None:
 
     logger.info(f'Uploading models to wandb from {checkpoint_path}')
     artifact = Artifact('model', type='model')
-    artifact.add_file(str(Path(checkpoint_path) / Path("model.onnx")))
-    artifact.add_file(str(Path(checkpoint_path) / Path("model_stripped.onnx")))
-    artifact.add_file(str(Path(checkpoint_path) / Path("model_best.pth.tar")))
+
+    checkpoint_dir = Path(checkpoint_path)
+    artifact.add_file(str(checkpoint_dir / "model.onnx"))
+
+    stripped_model_path = checkpoint_dir / "model_stripped.onnx"
+    if stripped_model_path.exists():
+        artifact.add_file(str(stripped_model_path))
+
+    artifact.add_file(str(checkpoint_dir / "model_best.pth.tar"))
     wandb_run.log_artifact(artifact)
     logger.info('Models uploaded to wandb successfully')
 
@@ -112,6 +140,11 @@ def export_models(model: torch.nn.Module,
                   wandb_run: Any = None) -> None:
     """
     Export the model to ONNX format and optionally upload to Weights & Biases (wandb).
+    
+    Automatically detects if the model contains Brevitas quantized layers and uses the
+    appropriate export method:
+    - For models with Brevitas layers: uses export_onnx_qcdq and strips initializers
+    - For models without Brevitas layers: uses torch.onnx.export directly
 
     Args:
         model (torch.nn.Module): The model to be exported.
@@ -132,24 +165,52 @@ def export_models(model: torch.nn.Module,
     model.eval()
     with torch.no_grad():
         _ = model(inputs)
-    logger.info(f'Exporting model to {checkpoint_path}/model.onnx')
-    export_onnx_qcdq(model,
-                     args=inputs,
-                     export_path=Path(checkpoint_path) / Path("model.onnx"),
-                     opset_version=20,
-                     input_names=['input'],
-                     output_names=['output'],
-                     dynamic_axes={
-                         'input': {
-                             0: 'batch_size'
-                         },
-                         'output': {
-                             0: 'batch_size'
-                         }
-                     })
-    logger.info(f'Exported model to {checkpoint_path}/model.onnx')
 
-    strip_initializers_from_onnx(Path(checkpoint_path) / Path("model.onnx"))
+    output_path = Path(checkpoint_path) / Path("model.onnx")
+    logger.info(f'Exporting model to {output_path}')
+
+    # Check if model contains Brevitas layers
+    use_brevitas_export = has_brevitas_layers(model)
+
+    if use_brevitas_export:
+        logger.info(
+            'Using Brevitas export (export_onnx_qcdq) for quantized model')
+        export_onnx_qcdq(model,
+                         args=inputs,
+                         export_path=output_path,
+                         opset_version=20,
+                         input_names=['input'],
+                         output_names=['output'],
+                         dynamic_axes={
+                             'input': {
+                                 0: 'batch_size'
+                             },
+                             'output': {
+                                 0: 'batch_size'
+                             }
+                         })
+        logger.info(f'Exported quantized model to {output_path}')
+
+        # Strip initializers from ONNX model for Brevitas exports
+        strip_initializers_from_onnx(output_path)
+    else:
+        logger.info(
+            'Using standard PyTorch ONNX export for non-quantized model')
+        torch.onnx.export(model,
+                          inputs,
+                          output_path,
+                          opset_version=20,
+                          input_names=['input'],
+                          output_names=['output'],
+                          dynamic_axes={
+                              'input': {
+                                  0: 'batch_size'
+                              },
+                              'output': {
+                                  0: 'batch_size'
+                              }
+                          })
+        logger.info(f'Exported standard model to {output_path}')
 
     if wandb_run is not None:
         upload_models_to_wandb(wandb_run, checkpoint_path)
