@@ -215,12 +215,12 @@ fi
 
 if [[ -n "$TEST" ]]; then
   echo "Running test workflow..."
-  docker run $TTY_FLAGS --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash -c "./utils/create_test_data.sh && bash run/run_full_workflow.sh run/configs/test_config.yaml"
+  docker run $TTY_FLAGS --shm-size=64g --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash -c "./utils/create_test_data.sh && bash run/run_full_workflow.sh run/configs/test_config.yaml"
 elif [[ -n "$CONFIG" ]]; then
   echo "Running workflow with $(basename "$CONFIG")..."
-  docker run $TTY_FLAGS --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash -c "bash run/run_full_workflow.sh $(basename "$CONFIG")"
+  docker run $TTY_FLAGS --shm-size=64g --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash -c "bash run/run_full_workflow.sh $(basename "$CONFIG")"
 else
   echo "Starting interactive session..."
   # For interactive sessions, we always want TTY
-  docker run -it --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash
+  docker run -it --shm-size=64g --rm $GPU_FLAG $PRIVILEGED_FLAG $DOCKER_FLAGS $VOLUMES $IMAGE bash
 fi
