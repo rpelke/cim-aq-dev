@@ -54,6 +54,7 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
     best_reward = -math.inf
     best_policy = []
     best_accuracy = 0.0
+    best_cost_ratio = 1.0
 
     # Timing and progress tracking
     start_time = time.time()
@@ -63,6 +64,7 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
     reward_history = []
     accuracy_history = []
     cost_history = []
+    cost_ratio_history = []
 
     # Create progress bar
     pbar = tqdm(total=num_episode,
@@ -138,10 +140,12 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
             # Track statistics
             accuracy = info.get('accuracy', 0.0)
             cost = info.get('cost', 0.0)
+            cost_ratio = info.get('cost_ratio', 1.0)
 
             reward_history.append(episode_reward)
             accuracy_history.append(accuracy)
             cost_history.append(cost)
+            cost_ratio_history.append(cost_ratio)
 
             # Calculate timing metrics for progress bar
             elapsed_time = time.time() - start_time
@@ -180,15 +184,16 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
 
             cost_display = cost * 1. / 8e6
             cost_ratio = info.get('cost_ratio', 0.0)
+            improvement_factor = 1.0 / cost_ratio if cost_ratio > 0.0 else 1.0
             if debug or episode % log_interval == 0:
                 logger.info(
                     f'Episode {episode:4d}: reward={episode_reward:7.4f}, '
                     f'acc={accuracy:6.4f}%, cost={cost_display:7.4f}, '
-                    f'cost_ratio={cost_ratio:.4f}, action={action_type}, '
+                    f'cost_ratio={cost_ratio:.4f}, improvement={improvement_factor:.4f}x, action={action_type}, '
                     f'time={episode_duration:.4f}s')
             text_writer.write(
-                '#{}: episode_reward:{:.4f} acc: {:.4f}, cost: {:.4f}\n'.
-                format(episode, episode_reward, accuracy, cost_display))
+                f'#{episode}: episode_reward:{episode_reward:.4f} acc: {accuracy:.4f}, cost: {cost_display:.4f}\n'
+            )
 
             final_reward = T[-1][0]
 
@@ -197,10 +202,14 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
                 best_reward = final_reward
                 best_policy = env.quantization_strategy.copy()
                 best_accuracy = accuracy
+                best_cost_ratio = cost_ratio
                 logger.info(
                     f"*** NEW BEST POLICY found at episode {episode} ***")
                 logger.info(f"    Best reward: {best_reward:.4f}")
                 logger.info(f"    Best accuracy: {best_accuracy:.4f}%")
+                logger.info(f"    Best cost ratio: {best_cost_ratio:.4f}")
+                logger.info(
+                    f"    Best improvement: {1.0/best_cost_ratio:.4f}x")
                 logger.info(f"    Strategy: {best_policy}")
 
                 # Save best policy immediately
@@ -262,44 +271,114 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
             tfwriter.add_scalar('policy_loss', policy_loss, episode)
             tfwriter.add_scalar('delta', delta, episode)
 
-            tfwriter.add_scalar('info/cost_ratio', info.get('cost_ratio', 0.0),
+            # Cost-related metrics
+            current_cost_ratio = info.get('cost_ratio', 0.0)
+            current_improvement = 1.0 / current_cost_ratio if current_cost_ratio > 0.0 else 1.0
+            best_improvement = 1.0 / best_cost_ratio if best_cost_ratio > 0.0 else 1.0
+
+            # Accuracy metrics
+            current_accuracy_drop = env.org_acc - accuracy
+            best_accuracy_drop = env.org_acc - best_accuracy
+
+            tfwriter.add_scalar('info/cost_ratio', current_cost_ratio, episode)
+            tfwriter.add_scalar('info/cost_ratio_best', best_cost_ratio,
+                                episode)
+            tfwriter.add_scalar('info/improvement_factor', current_improvement,
+                                episode)
+            tfwriter.add_scalar('info/improvement_factor_best',
+                                best_improvement, episode)
+            tfwriter.add_scalar('info/accuracy_best', best_accuracy, episode)
+            tfwriter.add_scalar('info/accuracy_drop', current_accuracy_drop,
+                                episode)
+            tfwriter.add_scalar('info/accuracy_drop_best', best_accuracy_drop,
                                 episode)
             # record the preserve rate for each layer
+            num_layers = len(env.quantization_strategy)
+            layer_padding = len(str(num_layers -
+                                    1))  # Calculate padding for layer indices
             for i, bit_widths in enumerate(env.quantization_strategy):
-                tfwriter.add_scalar('weight_bit_widths/{}'.format(i),
+                tfwriter.add_scalar(f'weight_bit_widths/{i:0{layer_padding}d}',
                                     bit_widths[0], episode)
-                tfwriter.add_scalar('activation_bit_widths/{}'.format(i),
-                                    bit_widths[1], episode)
+                tfwriter.add_scalar(
+                    f'activation_bit_widths/{i:0{layer_padding}d}',
+                    bit_widths[1], episode)
+
+            # record the best policy bit widths for each layer
+            if best_policy:
+                best_policy_padding = len(
+                    str(len(best_policy) -
+                        1))  # Calculate padding for best policy indices
+                for i, bit_widths in enumerate(best_policy):
+                    tfwriter.add_scalar(
+                        f'best_weight_bit_widths/{i:0{best_policy_padding}d}',
+                        bit_widths[0], episode)
+                    tfwriter.add_scalar(
+                        f'best_activation_bit_widths/{i:0{best_policy_padding}d}',
+                        bit_widths[1], episode)
 
             # ============ W&B logging ============#
             if wandb_enable:
+                # Calculate current metrics
+                current_cost_ratio = info.get('cost_ratio', 0.0)
+                current_improvement = 1.0 / current_cost_ratio if current_cost_ratio > 0.0 else 1.0
+                best_improvement = 1.0 / best_cost_ratio if best_cost_ratio > 0.0 else 1.0
+                current_accuracy_drop = env.org_acc - accuracy
+                best_accuracy_drop = env.org_acc - best_accuracy
+
                 wandb_metrics = {
                     'reward/last': final_reward,
                     'reward/best': best_reward,
                     'info/accuracy': info['accuracy'],
+                    'info/accuracy_best': best_accuracy,
+                    'info/accuracy_drop': current_accuracy_drop,
+                    'info/accuracy_drop_best': best_accuracy_drop,
                     'value_loss': value_loss,
                     'policy_loss': policy_loss,
                     'delta': delta,
-                    'info/cost_ratio': info.get('cost_ratio', 0.0),
+                    'info/cost_ratio': current_cost_ratio,
+                    'info/cost_ratio_best': best_cost_ratio,
+                    'info/improvement_factor': current_improvement,
+                    'info/improvement_factor_best': best_improvement,
                     'info/best_policy': str(best_policy),
                     'info/current_policy': str(env.quantization_strategy)
                 }
 
-                # Add per-layer preserve rates
+                # Add per-layer current bit widths
+                num_layers = len(env.quantization_strategy)
+                layer_padding = len(
+                    str(num_layers - 1))  # Calculate padding for layer indices
                 for i, bit_widths in enumerate(env.quantization_strategy):
-                    wandb_metrics[f'weight_bit_widths/{i}'] = bit_widths[0]
-                    wandb_metrics[f'activation_bit_widths/{i}'] = bit_widths[1]
+                    wandb_metrics[
+                        f'weight_bit_widths/{i:0{layer_padding}d}'] = bit_widths[
+                            0]
+                    wandb_metrics[
+                        f'activation_bit_widths/{i:0{layer_padding}d}'] = bit_widths[
+                            1]
+
+                # Add per-layer best policy bit widths
+                if best_policy:
+                    best_policy_padding = len(
+                        str(len(best_policy) -
+                            1))  # Calculate padding for best policy indices
+                    for i, bit_widths in enumerate(best_policy):
+                        wandb_metrics[
+                            f'best_weight_bit_widths/{i:0{best_policy_padding}d}'] = bit_widths[
+                                0]
+                        wandb_metrics[
+                            f'best_activation_bit_widths/{i:0{best_policy_padding}d}'] = bit_widths[
+                                1]
 
                 wandb.log(wandb_metrics, step=episode)
 
-            text_writer.write('best reward: {}\n'.format(best_reward))
-            text_writer.write('best policy: {}\n'.format(best_policy))
+            text_writer.write(f'best reward: {best_reward}\n')
+            text_writer.write(f'best policy: {best_policy}\n')
 
     # Close progress bar
     pbar.close()
 
     # Final summary
     total_time = time.time() - start_time
+    best_improvement = 1.0 / best_cost_ratio if best_cost_ratio > 0.0 else 1.0
     logger.info("=" * 60)
     logger.info("RL QUANTIZATION SEARCH COMPLETED")
     logger.info("=" * 60)
@@ -311,6 +390,8 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
     logger.info(f"Original accuracy: {env.org_acc:.4f}%")
     accuracy_drop = env.org_acc - best_accuracy
     logger.info(f"Accuracy drop: {accuracy_drop:.4f}%")
+    logger.info(f"Best cost ratio: {best_cost_ratio:.4f}")
+    logger.info(f"Best improvement factor: {best_improvement:.4f}x")
     logger.info(f"Best quantization strategy: {best_policy}")
 
     # Save final statistics
@@ -321,14 +402,51 @@ def train(num_episode, agent, env, output, debug=False, wandb_enable=False):
         'best_accuracy': best_accuracy,
         'original_accuracy': env.org_acc,
         'accuracy_drop': accuracy_drop,
+        'best_cost_ratio': best_cost_ratio,
+        'best_improvement_factor': best_improvement,
         'best_policy': best_policy,
         'reward_history': reward_history,
         'accuracy_history': accuracy_history,
-        'cost_history': cost_history
+        'cost_history': cost_history,
+        'cost_ratio_history': cost_ratio_history
     }
     with open(str(Path(output) / 'training_stats.pkl'), 'wb') as f:
         pickle.dump(stats, f)
     logger.info(f"Training statistics saved to {output}/training_stats.pkl")
+
+    # Log final summary to W&B
+    if wandb_enable:
+        # Create W&B summary with final statistics
+        wandb_summary = {
+            'final/total_episodes': num_episode,
+            'final/total_time_seconds': total_time,
+            'final/avg_time_per_episode': total_time / num_episode,
+            'final/best_reward': best_reward,
+            'final/best_accuracy': best_accuracy,
+            'final/original_accuracy': env.org_acc,
+            'final/accuracy_drop': accuracy_drop,
+            'final/best_cost_ratio': best_cost_ratio,
+            'final/best_improvement_factor': best_improvement,
+            'final/best_policy_str': str(best_policy)
+        }
+
+        # Add per-layer bit widths for best policy
+        if best_policy:
+            for i, bit_widths in enumerate(best_policy):
+                wandb_summary[
+                    f'final/best_weight_bit_widths/{i}'] = bit_widths[0]
+                wandb_summary[
+                    f'final/best_activation_bit_widths/{i}'] = bit_widths[1]
+
+        # Log as summary (these will appear in the run summary table)
+        try:
+            if wandb.run is not None:
+                for key, value in wandb_summary.items():
+                    wandb.run.summary[key] = value
+        except Exception as e:
+            logger.warning(f"Could not update W&B summary: {e}")
+
+        logger.info("Final statistics logged to W&B summary")
 
     text_writer.close()
     return best_policy, best_reward
@@ -507,7 +625,7 @@ if __name__ == "__main__":
                         help='W&B project name')
 
     args = parser.parse_args()
-    base_folder_name = '{}_{}'.format(args.arch, args.dataset)
+    base_folder_name = f'{args.arch}_{args.dataset}'
     if args.suffix is not None:
         base_folder_name = base_folder_name + '_' + args.suffix
     args.output = str(Path(args.output) / base_folder_name)
@@ -526,7 +644,7 @@ if __name__ == "__main__":
             config=vars(args),
             tags=['rl_quantization', args.arch, args.dataset])
 
-    logger.info('==> Output path: {}...'.format(args.output))
+    logger.info(f'==> Output path: {args.output}...')
 
     # Use CUDA if available, otherwise use CPU
     # Handle special "all" GPU configurations
