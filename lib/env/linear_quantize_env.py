@@ -80,12 +80,6 @@ class LinearQuantizeEnv:
         self.cur_ind = 0
         self.quantization_strategy = []  # quantization strategy
 
-        # Crossbar cell resolution constraint
-        self.consider_cell_resolution = args.consider_cell_resolution
-        self.cell_resolution = 1  # Default to 1 (no constraint)
-        if self.consider_cell_resolution:
-            self._load_hardware_config()
-
         self.finetune_lr = args.finetune_lr
         self.criterion = nn.CrossEntropyLoss().to(self.device)
         self.n_data_worker = args.n_worker
@@ -105,8 +99,18 @@ class LinearQuantizeEnv:
         if self.amp:
             self.scaler = GradScaler()
 
+        # Custom file paths
+        self.hardware_config_path = args.hardware_config_path
+        self.lookup_table_path = args.lookup_table_path
+
         # force first/last layer precision
         self.force_first_last_layer = args.force_first_last_layer
+
+        # Crossbar cell resolution constraint
+        self.consider_cell_resolution = args.consider_cell_resolution
+        self.cell_resolution = 1  # Default to 1 (no constraint)
+        if self.consider_cell_resolution:
+            self._load_hardware_config()
 
         # options from args
         self.min_bit = args.min_bit
@@ -306,14 +310,14 @@ class LinearQuantizeEnv:
 
     def _load_hardware_config(self):
         """Load hardware configuration and extract cell resolution."""
-        config_path = Path(__file__).resolve(
-        ).parent.parent / 'simulator' / 'hardware_config.yaml'
+        config_path = Path(self.hardware_config_path)
+
         try:
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
             self.cell_resolution = config['crossbar']['resolution_weight_bits']
             logger.info(
-                f'=> Loaded crossbar cell resolution: {self.cell_resolution} bits'
+                f'=> Loaded crossbar cell resolution: {self.cell_resolution} bits from {config_path}'
             )
         except FileNotFoundError:
             logger.warning(
@@ -569,18 +573,24 @@ class LinearQuantizeEnv:
             np.array(layer_embedding, 'float'))
 
     def _get_lookuptable(self):
-
-        lookup_table_folder = 'lib/simulator/lookup_tables/'
-        Path(lookup_table_folder).mkdir(parents=True, exist_ok=True)
-        if self.cost_mode == 'crossbar':
-            fname = lookup_table_folder + self.arch + '_batch' + str(
-                self.simulator_batch) + '_latency_table.npy'
+        # Check if custom lookup table path is provided
+        if self.lookup_table_path:
+            fname = self.lookup_table_path
+            logger.info(f'Using custom lookup table: {fname}')
         else:
-            # add your own cost lookuptable here
-            raise NotImplementedError
+            # Use default path logic
+            lookup_table_folder = 'lib/simulator/lookup_tables/'
+            Path(lookup_table_folder).mkdir(parents=True, exist_ok=True)
+            if self.cost_mode == 'crossbar':
+                fname = lookup_table_folder + self.arch + '_batch' + str(
+                    self.simulator_batch) + '_latency_table.npy'
+            else:
+                # add your own cost lookuptable here
+                raise NotImplementedError
+            logger.info(f'Using default lookup table: {fname}')
 
         if Path(fname).is_file():
-            logger.info(f'load latency table : {fname}')
+            logger.info(f'Loading latency table: {fname}')
             latency_list = np.load(fname)
             logger.debug(f'Latency table contents: {latency_list}')
         else:

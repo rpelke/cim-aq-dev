@@ -11,8 +11,8 @@
 set -euo pipefail
 
 # This script generates a latency lookup table for a model using the hardware configuration
-# Usage: bash run_hardware_config.sh [model_name] [max_bit] [layer_dims_file] [hardware_config_file]
-# Example: bash run_hardware_config.sh qvgg16 8 vgg16_layer_dimensions.yaml hardware_config.yaml
+# Usage: bash run_hardware_config.sh [model_name] [max_bit] [layer_dims_path] [hardware_config_path] [output_path]
+# Example: bash run_hardware_config.sh qvgg16 8 /path/to/vgg16_layer_dimensions.yaml /path/to/hardware_config.yaml /path/to/output_table.npy
 
 # Get the directory of the script and the repository root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -21,12 +21,9 @@ REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 # Default values with command line overrides
 MODEL_NAME=${1:-"qvgg16"}
 MAX_BIT=${2:-8}
-LAYER_DIMS_FILE=${3:-"vgg16_layer_dimensions.yaml"}
-HARDWARE_CONFIG_FILE=${4:-"hardware_config.yaml"}
-
-# Set full paths
-HARDWARE_CONFIG_PATH="${REPO_ROOT}/lib/simulator/${HARDWARE_CONFIG_FILE}"
-LAYER_DIMS_PATH="${REPO_ROOT}/lib/simulator/${LAYER_DIMS_FILE}"
+LAYER_DIMS_PATH=${3:-"${REPO_ROOT}/lib/simulator/vgg16_layer_dimensions.yaml"}
+HARDWARE_CONFIG_PATH=${4:-"${REPO_ROOT}/lib/simulator/hardware_config.yaml"}
+OUTPUT_PATH=${5:-"${REPO_ROOT}/lib/simulator/lookup_tables/${MODEL_NAME}_batch1_latency_table.npy"}
 
 echo "Generating latency lookup table for ${MODEL_NAME}..."
 echo "Using layer dimensions: ${LAYER_DIMS_PATH}"
@@ -50,7 +47,8 @@ python ${REPO_ROOT}/lib/simulator/create_custom_latency_table.py \
   --model_name $MODEL_NAME \
   --max_bit $MAX_BIT \
   --layer_dims_yaml $LAYER_DIMS_PATH \
-  --hardware_config_yaml $HARDWARE_CONFIG_PATH
+  --hardware_config_yaml $HARDWARE_CONFIG_PATH \
+  --output_path "$OUTPUT_PATH"
 
 # Check if latency table generation succeeded
 if [ $? -ne 0 ]; then
@@ -59,4 +57,4 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Latency table generation complete."
-echo "The table is saved in ${REPO_ROOT}/lib/simulator/lookup_tables/${MODEL_NAME}_batch1_latency_table.npy"
+echo "The table is saved at: $OUTPUT_PATH"

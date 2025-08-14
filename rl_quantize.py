@@ -623,6 +623,16 @@ if __name__ == "__main__":
                         default='haq-quantization',
                         type=str,
                         help='W&B project name')
+    # Custom path options
+    parser.add_argument('--hardware_config_path',
+                        default=Path(__file__).resolve().parent / 'lib' /
+                        'simulator' / 'hardware_config.yaml',
+                        type=str,
+                        help='Custom path to hardware config YAML file')
+    parser.add_argument('--lookup_table_path',
+                        default=None,
+                        type=str,
+                        help='Custom path to lookup table .npy file')
 
     args = parser.parse_args()
     base_folder_name = f'{args.arch}_{args.dataset}'

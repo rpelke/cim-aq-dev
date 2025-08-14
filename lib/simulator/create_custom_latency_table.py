@@ -56,7 +56,8 @@ def parse_int(value: str | int) -> int:
 def create_crossbar_latency_table(
         model_name: str, max_bit: int, layer_dimensions_yaml: list[dict[str,
                                                                         Any]],
-        hardware_config: dict[str, Any]) -> tuple[np.ndarray, Path]:
+        hardware_config: dict[str, Any],
+        output_path: Path) -> tuple[np.ndarray, Path]:
     """
     Creates a latency lookup table for a crossbar-based MVM hardware for each layer x weight bit x activation bit.
     
@@ -65,6 +66,7 @@ def create_crossbar_latency_table(
         max_bit (int): Maximum bit-width to sweep over for weights and activations
         layer_dimensions_yaml (list): List of layer dimensions from YAML file
         hardware_config (dict): Dictionary loaded from YAML with hardware parameters
+        output_path (Path): Custom output path for the lookup table (optional)
 
     Returns:
         A 3D numpy array where dimensions are [layer_idx, weight_bits, activation_bits]
@@ -141,17 +143,19 @@ def create_crossbar_latency_table(
                 latency_table[layer_idx, w_bit - 1, a_bit - 1] = latency
 
     # Save the table
-    save_dir = Path('lib') / 'simulator' / 'lookup_tables'
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / f'{model_name}_batch1_latency_table.npy'
-    np.save(save_path, latency_table)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f'Latency table created and saved at {save_path}')
-    return latency_table, save_path
+    np.save(output_path, latency_table)
+
+    logger.info(f'Latency table created and saved at {output_path}')
+    return latency_table, output_path
 
 
 if __name__ == '__main__':
     import argparse
+
+    # Get the project root directory
+    project_root = Path(__file__).parent.parent.parent
 
     parser = argparse.ArgumentParser(
         description=
@@ -160,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--model_name',
         type=str,
-        required=True,
+        default='qvgg16',
         help='Name to use for the output file (e.g., vgg16, resnet18)')
 
     parser.add_argument('--max_bit',
@@ -168,17 +172,29 @@ if __name__ == '__main__':
                         default=8,
                         help='Maximum bit-width to consider')
 
-    parser.add_argument('--layer_dims_yaml',
-                        type=str,
-                        required=True,
-                        help='YAML file path with layer dimensions')
+    parser.add_argument(
+        '--layer_dims_yaml',
+        type=str,
+        default=str(project_root /
+                    'lib/simulator/vgg16_layer_dimensions.yaml'),
+        help='YAML file path with layer dimensions')
 
     parser.add_argument('--hardware_config_yaml',
                         type=str,
-                        required=True,
+                        default=str(project_root /
+                                    'lib/simulator/hardware_config.yaml'),
                         help='YAML config file for hardware')
 
+    parser.add_argument('--output_path',
+                        type=Path,
+                        default=None,
+                        help='Custom output path for the lookup table')
+
     args = parser.parse_args()
+
+    if args.output_path is None:
+        args.output_path = Path(__file__).parent.resolve(
+        ) / 'lookup_tables' / f'{args.model_name}_batch1_latency_table.npy'
 
     # Load hardware configuration YAML
     try:
@@ -201,11 +217,12 @@ if __name__ == '__main__':
         logger.error(f'Error loading layer dimensions: {e}')
         exit(1)
 
-    latency_table, save_path = create_crossbar_latency_table(
+    latency_table, output_path = create_crossbar_latency_table(
         args.model_name,
         max_bit=args.max_bit,
         layer_dimensions_yaml=layer_dimensions,
-        hardware_config=hardware_config)
+        hardware_config=hardware_config,
+        output_path=args.output_path)
 
     logger.info(f'Example latency values for first layer:')
     logger.info(f'W=8bit, A=8bit: {latency_table[0, 7, 7]}')
