@@ -14,8 +14,8 @@
 # - Minimal batch size and reduced bit-width search space
 # Model Configuration
 models:
-  quant_model: qvgg11
-  fp32_model: custom_vgg11
+  quant_model: qresnet18
+  fp32_model: custom_resnet18
 # Dataset Configuration  
 datasets:
   small:
