@@ -31,22 +31,162 @@ jobs:
       - name: Install formatting dependencies
         run: |
           pip install -r utils/requirements_format.txt
-      - name: Check current formatting
+      - name: Check workflow files formatting
+        id: workflow-check
+        run: |
+          echo "Checking workflow files for formatting issues..."
+
+          # Create directory for workflow diffs
+          mkdir -p /tmp/workflow-diffs
+
+          # Find all workflow YAML files
+          WORKFLOW_FILES=(.github/workflows/*.yml .github/workflows/*.yaml)
+          WORKFLOW_NEEDS_FORMATTING=false
+          for file in "${WORKFLOW_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              
+              # Create a temporary formatted version
+              cp "$file" "/tmp/${file##*/}.original"
+              cp "$file" "/tmp/${file##*/}.formatted"
+              
+              # Apply yamlfix to the temp file
+              if yamlfix "/tmp/${file##*/}.formatted" 2>/dev/null; then
+                # Generate diff if there are changes
+                if ! diff -u "$file" "/tmp/${file##*/}.formatted" > "/tmp/workflow-diffs/${file##*/}.diff" 2>/dev/null; then
+                  echo "  ⚠️  $file needs formatting"
+                  WORKFLOW_NEEDS_FORMATTING=true
+                else
+                  # No changes, remove empty diff
+                  rm -f "/tmp/workflow-diffs/${file##*/}.diff"
+                fi
+              fi
+            fi
+          done
+          if [ "$WORKFLOW_NEEDS_FORMATTING" = true ]; then
+            echo "workflow_needs_formatting=true" >> $GITHUB_OUTPUT
+            echo "Some workflow files need formatting - diffs will be saved as artifacts"
+          else
+            echo "workflow_needs_formatting=false" >> $GITHUB_OUTPUT
+            echo "All workflow files are correctly formatted"
+          fi
+      - name: Check non-workflow files formatting
         id: format-check
         run: |
           cd utils
+
+          # Temporarily append workflow exclusion to .gitignore
+          if [ -f ../.gitignore ]; then
+            cp ../.gitignore ../.gitignore.backup
+          fi
+          echo "" >> ../.gitignore
+          echo "# Temporary exclusion for formatting check" >> ../.gitignore
+          echo ".github/workflows/" >> ../.gitignore
+
+          # Check formatting of non-workflow files
           if python format.py --show-errors; then
             echo "formatted=true" >> $GITHUB_OUTPUT
-            echo "Repository is correctly formatted"
+            echo "Non-workflow files are correctly formatted"
           else
             echo "formatted=false" >> $GITHUB_OUTPUT
-            echo "Repository needs formatting"
+            echo "Non-workflow files need formatting"
           fi
-      - name: Apply formatting fixes
+
+          # Restore original .gitignore
+          if [ -f ../.gitignore.backup ]; then
+            mv ../.gitignore.backup ../.gitignore
+            rm -f ../.gitignore.backup
+          fi
+      - name: Apply formatting fixes (excluding workflows)
         if: steps.format-check.outputs.formatted == 'false'
         run: |
           cd utils
+
+          # Temporarily append workflow exclusion to .gitignore
+          if [ -f ../.gitignore ]; then
+            cp ../.gitignore ../.gitignore.backup
+          fi
+          echo "" >> ../.gitignore
+          echo "# Temporary exclusion for formatting" >> ../.gitignore
+          echo ".github/workflows/" >> ../.gitignore
+
+          # Apply formatting to all files except workflows
           python format.py --fix --show-errors
+
+          # Restore original .gitignore
+          if [ -f ../.gitignore.backup ]; then
+            mv ../.gitignore.backup ../.gitignore
+            rm -f ../.gitignore.backup
+          fi
+      - name: Upload workflow formatting diffs as artifacts
+        if: steps.workflow-check.outputs.workflow_needs_formatting == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-formatting-diffs-${{ github.run_number }}
+          path: /tmp/workflow-diffs/*.diff
+          retention-days: 90
+          if-no-files-found: warn
+      - name: Comment on workflow formatting (for PRs)
+        if: |
+          steps.workflow-check.outputs.workflow_needs_formatting == 'true' &&
+          github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            // Read all diff files
+            const diffDir = '/tmp/workflow-diffs';
+            let comment = '## ⚠️ Workflow Files Need Formatting\n\n';
+            comment += 'The following workflow files have formatting issues that need to be fixed manually:\n\n';
+            try {
+              const files = fs.readdirSync(diffDir);
+              
+              for (const file of files) {
+                if (file.endsWith('.diff')) {
+                  const diffContent = fs.readFileSync(path.join(diffDir, file), 'utf8');
+                  const workflowName = file.replace('.diff', '');
+                  
+                  comment += `### \`${workflowName}\`\n\n`;
+                  comment += '<details><summary>View diff</summary>\n\n';
+                  comment += '```diff\n' + diffContent + '\n```\n\n';
+                  comment += '</details>\n\n';
+                }
+              }
+              
+              comment += '**Note:** Workflow files cannot be auto-formatted by GitHub Actions for security reasons. ';
+              comment += 'Please apply these changes manually or download the diff artifacts to review.\n\n';
+              comment += `📦 [Download all diffs as artifact](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } catch (error) {
+              console.log('Error reading diff files:', error);
+            }
+      - name: Display workflow formatting summary
+        if: steps.workflow-check.outputs.workflow_needs_formatting == 'true'
+        run: |
+          echo "## ⚠️ Workflow Formatting Issues Detected"
+          echo ""
+          echo "Some workflow files need formatting but cannot be auto-fixed for security reasons."
+          echo "The diffs have been saved as artifacts for manual review."
+          echo ""
+          echo "Affected files:"
+          for diff in /tmp/workflow-diffs/*.diff; do
+            if [ -f "$diff" ]; then
+              filename=$(basename "$diff" .diff)
+              echo "  - .github/workflows/$filename"
+              echo ""
+              echo "Diff for $filename:"
+              cat "$diff"
+              echo ""
+              echo "---"
+            fi
+          done
       - name: Check for changes after formatting
         if: steps.format-check.outputs.formatted == 'false'
         id: git-check
@@ -76,7 +216,7 @@ jobs:
           - Applied yapf formatting to Python files
           - Applied beautysh formatting to shell scripts
           - Applied mdformat formatting to Markdown files
-          - Applied yamllint formatting to YAML files
+          - Applied yamlfix formatting to YAML files
           This commit was automatically generated by the formatting workflow."
 
           # Push the branch
@@ -93,7 +233,7 @@ jobs:
           - Python files formatted with yapf
           - Shell scripts formatted with beautysh
           - Markdown files formatted with mdformat
-          - YAML files formatted with yamllint
+          - YAML files formatted with yamlfix
 
           ## Review Notes
           - This is an automated formatting fix
@@ -118,22 +258,50 @@ jobs:
           - Applied yapf formatting to Python files
           - Applied beautysh formatting to shell scripts
           - Applied mdformat formatting to Markdown files
-          - Applied yamllint formatting to YAML files
+          - Applied yamlfix formatting to YAML files
           This commit was automatically generated by the formatting workflow."
 
           # Push changes to the current branch
           git push origin HEAD
-      - name: Report formatting status
-        if: steps.format-check.outputs.formatted == 'true'
+      - name: Report final status and fail if needed
+        if: always()
         run: |
-          echo "✅ Repository is correctly formatted - no action needed"
-      - name: Report no changes needed
-        if: |
-          steps.format-check.outputs.formatted == 'false' &&
-          steps.git-check.outputs.changes == 'false'
-        run: |
-          echo "⚠️ Format check failed but no changes were made by formatter"
-          echo "This might indicate an issue with the formatting configuration"
+          FORMATTED="${{ steps.format-check.outputs.formatted }}"
+          CHANGES_MADE="${{ steps.git-check.outputs.changes }}"
+          WORKFLOW_NEEDS_FORMATTING="${{ steps.workflow-check.outputs.workflow_needs_formatting }}"
+          echo "## 📋 Final Status Report"
+          echo ""
+
+          # Check all possible states and report accordingly
+          if [[ "$FORMATTED" == "true" && "$WORKFLOW_NEEDS_FORMATTING" != "true" ]]; then
+            echo "✅ Repository is correctly formatted - no action needed"
+            exit 0
+          elif [[ "$FORMATTED" == "true" && "$WORKFLOW_NEEDS_FORMATTING" == "true" ]]; then
+            echo "⚠️ Non-workflow files are correctly formatted"
+            echo "❌ Workflow files need formatting but cannot be auto-fixed"
+            echo ""
+            echo "📦 Download the diff artifacts or view them in the logs, then apply with: patch < file.diff or modify the files manually."
+            exit 1
+          elif [[ "$FORMATTED" == "false" && "$CHANGES_MADE" == "false" ]]; then
+            echo "⚠️ Format check failed but no changes were made by formatter"
+            echo "This might indicate an issue with the formatting configuration"
+            exit 1
+          elif [[ "$WORKFLOW_NEEDS_FORMATTING" == "true" ]]; then
+            echo "The following actions were taken:"
+            if [[ "$CHANGES_MADE" == "true" ]]; then
+              echo "  ✅ Non-workflow files were auto-formatted and committed"
+            fi
+            echo "  ❌ Workflow files need formatting but cannot be auto-fixed"
+            echo ""
+            echo "📦 Download the diff artifacts or view them in the logs, then apply with: patch < file.diff or modify the files manually."
+            exit 1
+          elif [[ "$CHANGES_MADE" == "true" ]]; then
+            echo "✅ All files formatted successfully and changes committed"
+            exit 0
+          else
+            echo "⚠️ Unexpected state - please review workflow logs"
+            exit 1
+          fi
       - name: Summary
         if: always()
         run: |-
@@ -141,6 +309,11 @@ jobs:
           echo "- Branch: ${{ github.ref_name }}"
           echo "- Formatted: ${{ steps.format-check.outputs.formatted || 'N/A' }}"
           echo "- Changes made: ${{ steps.git-check.outputs.changes || 'N/A' }}"
+          echo "- Workflow files need formatting: ${{ steps.workflow-check.outputs.workflow_needs_formatting || 'N/A' }}"
           if [[ "${{ steps.format-check.outputs.formatted }}" == "false" ]]; then
             echo "- Action taken: ${{ github.ref == 'refs/heads/main' && 'PR created' || 'Direct commit' }}"
+          fi
+          if [[ "${{ steps.workflow-check.outputs.workflow_needs_formatting }}" == "true" ]]; then
+            echo ""
+            echo "⚠️  Note: Workflow files need manual formatting - see artifacts for diffs"
           fi

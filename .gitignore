@@ -21,3 +21,6 @@ save*
 
 # Include .npy files in results folder
 !results/**/*.npy
+
+# Backup files
+*.backup
