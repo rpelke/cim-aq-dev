@@ -321,9 +321,9 @@ class CrossbarCalculator:
         self.cell_resolution = crossbar_params['resolution_weight_bits']
         self.input_resolution = crossbar_params['resolution_input_bits']
 
-        # Get mapping type
+        # Get mapping type (default to differential-column)
         self.mapping_type = self.hardware_config.get('mapper', {}).get(
-            'mapping_type', 'differential')
+            'mapping_type', 'dc')
 
     @staticmethod
     def process_dimension(dim: str | int) -> int:
@@ -359,18 +359,31 @@ class CrossbarCalculator:
         Returns:
             Tuple of (writes, executes)
         """
-        # Calculate MVM writes based on mapping type
-        if self.mapping_type == 'linear-scaling':
-            num_mvm_writes = (
-                np.ceil(m / self.crossbar_size_m *
-                        np.ceil(weight_bits / self.cell_resolution)) *
-                np.ceil(n / self.crossbar_size_n))
+        # Number of weight bit-slices
+        num_weight_slices = np.ceil(weight_bits / self.cell_resolution)
+
+        # Resolve mapping type aliases
+        # Note: m (output_dim) maps to crossbar columns (M)
+        #       n (input_dim) maps to crossbar rows (N)
+        num_cols = m * num_weight_slices
+        num_rows = n
+        if self.mapping_type in ("of", "offset"):
+            # Offset: +1 column for bias correction
+            num_cols = num_cols + 1
+        elif self.mapping_type in ("dc", "differential-column"):
+            # Differential column: 2 columns per weight (pos/neg)
+            num_cols = num_cols * 2
+        elif self.mapping_type in ("dr", "differential-row"):
+            # Differential row: 2 rows per weight (pos/neg)
+            num_rows = num_rows * 2
         else:
-            # differential mode mapping -> each weight is mapped to two cells
-            num_mvm_writes = (
-                np.ceil(2 * m / self.crossbar_size_m *
-                        np.ceil(weight_bits / self.cell_resolution)) *
-                np.ceil(n / self.crossbar_size_n))
+            raise ValueError(
+                f"Unknown mapping type: {self.mapping_type}. "
+                f"Use: offset (of), differential-column (dc), differential-row (dr)"
+            )
+
+        num_mvm_writes = (np.ceil(num_cols / self.crossbar_size_m) *
+                          np.ceil(num_rows / self.crossbar_size_n))
 
         # Calculate MVM executes
         num_mvm_executes = mvm_invocations * num_mvm_writes * np.ceil(

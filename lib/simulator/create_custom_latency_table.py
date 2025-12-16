@@ -113,16 +113,31 @@ def create_crossbar_latency_table(
         for w_bit in range(1, max_bit + 1):
             # For each activation bit configuration
             for a_bit in range(1, max_bit + 1):
-                # Calculate number of MVM writes based on mapping type
-                if mapping_type == 'linear-scaling':
-                    num_mvm_writes = np.ceil(m / crossbar_size_m * np.ceil(
-                        w_bit / cell_resolution)) * np.ceil(
-                            n / crossbar_size_n)
+                # Number of weight bit-slices
+                num_weight_slices = np.ceil(w_bit / cell_resolution)
+
+                # Resolve mapping type aliases
+                # Note: m (output_dim) maps to crossbar columns (M)
+                #       n (input_dim) maps to crossbar rows (N)
+                num_cols = m * num_weight_slices
+                num_rows = n
+                if mapping_type in ("of", "offset"):
+                    # Offset: +1 column for bias correction
+                    num_cols = num_cols + 1
+                elif mapping_type in ("dc", "differential-column"):
+                    # Differential column: 2 columns per weight (pos/neg)
+                    num_cols = num_cols * 2
+                elif mapping_type in ("dr", "differential-row"):
+                    # Differential row: 2 rows per weight (pos/neg)
+                    num_rows = num_rows * 2
                 else:
-                    # differential mode mapping -> each weight is mapped to two cells
-                    num_mvm_writes = np.ceil(2 * m / crossbar_size_m * np.ceil(
-                        w_bit / cell_resolution)) * np.ceil(
-                            n / crossbar_size_n)
+                    raise ValueError(
+                        f"Unknown mapping type: {mapping_type}. "
+                        f"Use: offset (of), differential-column (dc), differential-row (dr)"
+                    )
+
+                num_mvm_writes = np.ceil(num_cols / crossbar_size_m) * np.ceil(
+                    num_rows / crossbar_size_n)
 
                 # Calculate the number of MVM executes
                 # For simple Dense layers: mvm_invocations = 1

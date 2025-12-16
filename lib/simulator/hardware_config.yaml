@@ -11,13 +11,26 @@
 ##################################################
 # Crossbar parameters
 crossbar:
-  size:  # Size of crossbar array
-    m: 256
-    n: 256
+  size:  # Size of M x N crossbar array
+    m: 256  # Number of columns (output_dim maps here)
+    n: 256  # Number of rows (input_dim maps here)
   resolution_weight_bits: 4  # Bits of precision per crossbar cell
   resolution_input_bits: 1  # Bits of precision per input
   mvm_write_latency: 56  # Latency for writing to crossbar (in us)
   mvm_execute_latency: 1.4  # Latency for executing MVM operation (in us)
 # Mapper parameters
 mapper:
-  mapping_type: differential  # Type of mapping for weights to crossbar cells (Options: differential, linear-scaling)
+  # Weight mapping mode for crossbar cells (with aliases)
+  # Options:
+  #   - offset (of): Weights biased positive, +1 units column
+  #       Ref: Shafiee et al., "ISAAC: A CNN accelerator with in-situ analog
+  #            arithmetic in crossbars," ACM SIGARCH Comp. Arch. News, 2016.
+  #   - differential-column (dc): Pos/neg weights in adjacent columns (2x columns)
+  #       Refs: Chi et al., "PRIME: Processing-in-memory architecture for NN
+  #             computation in ReRAM-based main memory," HPCA, 2016.
+  #             Cao et al., "Neural-PIM: Efficient PIM with neural approximation
+  #             of peripherals," IEEE Trans. Computers, 2021.
+  #   - differential-row (dr): Pos/neg weights in adjacent rows (2x rows)
+  #       Ref: Wan et al., "A voltage-mode sensing scheme with differential-row
+  #            weight mapping for energy-efficient RRAM-based IMC," VLSI, 2020.
+  mapping_type: dc

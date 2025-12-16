@@ -134,10 +134,16 @@ layer_dimensions:
 # Note: The mvm_invocations field is used to calculate the number of MVM executions.
 # It is particularly relevant for Conv2D, MatMul, and MHA layers where GeMMs are divided into multiple MVM executions.
 #
-# The cost calculation for MVM writes and executions is as follows:
-# num_mvm_writes = ceil(delta * m / crossbar_size_m * ceil(w_bit / cell_resolution)) * ceil(n / crossbar_size_n) (delta = 1 for linear-scaling mode, delta = 2 for differential mode)
-# num_mvm_executes = mvm_invocations * num_mvm_writes * ceil(a_bit / input_resolution)
-# total_latency = repeat_factor * (num_mvm_writes * write_latency + num_mvm_executes * execute_latency)
+# Weight Mapping Modes (Nw = ceil(w_bit / cell_resolution)):
+#   m (output_dim) maps to crossbar columns (M), n (input_dim) maps to crossbar rows (N)
+#   - offset (of): +1 column → num_cols = m * Nw + 1
+#   - differential-column (dc): 2 columns per weight → num_cols = m * Nw * 2
+#   - differential-row (dr): 2 rows per weight → num_rows = n * 2
+#
+# Cost formulas:
+#   num_mvm_writes = ceil(num_cols / crossbar_M) * ceil(num_rows / crossbar_N)
+#   num_mvm_executes = mvm_invocations * num_mvm_writes * ceil(a_bit / input_resolution)
+#   total_latency = repeat_factor * (num_mvm_writes * write_latency + num_mvm_executes * execute_latency)
 #
 # For different layer types:
 # - Conv2D layers: mvm_invocations is derived from the spatial dimensions of the output feature map
